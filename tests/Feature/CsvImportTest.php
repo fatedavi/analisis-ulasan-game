@@ -77,7 +77,10 @@ it('mengimpor CSV menjadi artefak nyata sesuai aturan rating proxy', function ()
     expect(array_sum([$confusion['tn'], $confusion['fp'], $confusion['fn'], $confusion['tp']]))->toBe(8)
         ->and($confusion['tp'] + $confusion['fn'])->toBe(4)
         ->and($confusion['tn'] + $confusion['fp'])->toBe(4)
-        ->and(count($evaluation['grid']))->toBe(12);
+        ->and(count($evaluation['grid']))->toBe(12)
+        ->and($evaluation['kfold'])->not->toBeNull()
+        ->and($evaluation['kfold']['plans'])->toHaveKeys(['5', '10'])
+        ->and($evaluation['kfold']['series'])->toHaveCount(12);
 
     getJson('/api/summary')
         ->assertOk()

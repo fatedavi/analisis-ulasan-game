@@ -20,6 +20,52 @@ export type Summary = {
     generated_at: string | null;
 };
 
+export type FoldPlanFold = {
+    fold: number;
+    size: number;
+    positive: number;
+    negative: number;
+};
+
+export type FoldPlanIteration = {
+    iteration: number;
+    test_folds: number[];
+    train_size: number;
+    test_size: number;
+};
+
+export type FoldPlan = {
+    k: number;
+    fold_count: number;
+    test_folds_per_iteration: number;
+    iterations_count: number;
+    folds: FoldPlanFold[];
+    iterations: FoldPlanIteration[];
+};
+
+export type FoldRow = {
+    fold: number;
+    iteration: number;
+    test_folds: number[];
+    train_size: number;
+    test_size: number;
+    accuracy: number;
+    macro_f1: number;
+    positive_f1: number;
+    negative_f1: number;
+};
+
+export type KfoldSeries = {
+    k: number;
+    alpha: number;
+    per_fold: FoldRow[];
+};
+
+export type EvaluationKfold = {
+    plans: Record<string, FoldPlan>;
+    series: KfoldSeries[];
+};
+
 export type Evaluation = {
     run_id: string | null;
     demo: boolean;
@@ -39,6 +85,7 @@ export type Evaluation = {
     };
     baseline_majority_accuracy: number;
     grid: { k: number; alpha: number; macro_f1: number; accuracy: number }[];
+    kfold?: EvaluationKfold | null;
 };
 
 export type CloudWord = {

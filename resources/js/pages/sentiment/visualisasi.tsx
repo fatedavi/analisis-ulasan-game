@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Trophy } from 'lucide-react';
 
 import ConfusionMatrix from '@/components/ak/confusion-matrix';
@@ -6,7 +7,7 @@ import Panel from '@/components/ak/panel';
 import StatBlock from '@/components/ak/stat-block';
 import { pct } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { Evaluation } from '@/types/sentiment';
+import type { Evaluation, FoldRow, KfoldSeries } from '@/types/sentiment';
 
 function BestConfigStrip({ evaluation }: { evaluation: Evaluation }) {
     return (
@@ -99,6 +100,214 @@ function ConfigGridTable({ evaluation }: { evaluation: Evaluation }) {
                 </tbody>
             </table>
         </div>
+    );
+}
+
+function FoldBars({ row }: { row: FoldRow }) {
+    const bars = [
+        { label: 'Akurasi', value: row.accuracy, className: 'bg-ak-gold' },
+        { label: 'Macro F1', value: row.macro_f1, className: 'bg-ak-positive' },
+    ];
+
+    return (
+        <div className="flex flex-col gap-1">
+            {bars.map((bar) => (
+                <div
+                    key={bar.label}
+                    className="flex items-center gap-2"
+                    title={`${bar.label}: ${pct(bar.value, 2)}`}
+                >
+                    <div className="bg-ak-line/70 h-2 w-24 overflow-hidden">
+                        <div
+                            className={cn('h-full', bar.className)}
+                            style={{
+                                width: `${Math.max(0, Math.min(1, bar.value)) * 100}%`,
+                            }}
+                        />
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function KFoldTable({ series }: { series: KfoldSeries }) {
+    return (
+        <div className="ak-scroll overflow-x-auto">
+            <table className="w-full min-w-[720px] border-collapse text-left">
+                <thead>
+                    <tr className="border-ak-line border-b">
+                        <th className="ak-hud-label p-2.5 pl-0">Fold</th>
+                        <th className="ak-hud-label p-2.5">Iterasi</th>
+                        <th className="ak-hud-label p-2.5">Fold Uji</th>
+                        <th className="ak-hud-label p-2.5 text-right">
+                            Latih / Uji
+                        </th>
+                        <th className="ak-hud-label p-2.5 text-right">
+                            Akurasi
+                        </th>
+                        <th className="ak-hud-label p-2.5 text-right">
+                            Macro F1
+                        </th>
+                        <th className="ak-hud-label p-2.5 pr-0 text-right">
+                            Grafik
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {series.per_fold.map((row) => (
+                        <tr
+                            key={row.fold}
+                            className="border-ak-line/60 hover:bg-ak-raised/50 border-b transition-colors"
+                        >
+                            <td className="ak-mono text-foreground p-2.5 pl-0 text-sm">
+                                {row.fold}
+                            </td>
+                            <td className="ak-mono text-ak-muted p-2.5 text-[12px]">
+                                {row.iteration}
+                            </td>
+                            <td className="ak-mono text-ak-muted p-2.5 text-[12px]">
+                                {row.test_folds.join(', ')}
+                            </td>
+                            <td className="ak-mono text-ak-faint p-2.5 text-right text-[12px]">
+                                {row.train_size} / {row.test_size}
+                            </td>
+                            <td className="ak-mono text-foreground p-2.5 text-right text-sm">
+                                {pct(row.accuracy, 2)}
+                            </td>
+                            <td className="ak-mono text-ak-gold p-2.5 text-right text-sm">
+                                {pct(row.macro_f1, 2)}
+                            </td>
+                            <td className="p-2.5 pr-0">
+                                <div className="flex justify-end">
+                                    <FoldBars row={row} />
+                                </div>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+function KFoldPanel({ evaluation }: { evaluation: Evaluation }) {
+    const kfold = evaluation.kfold;
+    const [selectedK, setSelectedK] = useState<number | null>(
+        kfold ? evaluation.best.k : null,
+    );
+
+    if (!kfold) {
+        return null;
+    }
+
+    const availableK = [
+        ...new Set(kfold.series.map((series) => series.k)),
+    ].sort((a, b) => a - b);
+    const activeK =
+        selectedK !== null && availableK.includes(selectedK)
+            ? selectedK
+            : availableK[0];
+    const candidates = kfold.series.filter((series) => series.k === activeK);
+    const bestSeries =
+        candidates.find(
+            (series) => Math.abs(series.alpha - evaluation.best.alpha) < 1e-9,
+        ) ?? candidates[0];
+    const plan = kfold.plans[String(activeK)];
+
+    if (!bestSeries) {
+        return null;
+    }
+
+    return (
+        <Panel title="Validasi K-Fold" code="EV-03">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                    {availableK.map((k) => (
+                        <button
+                            key={k}
+                            type="button"
+                            onClick={() => setSelectedK(k)}
+                            className={cn(
+                                'ak-clip-sm ak-hud-label border px-3 py-1.5 transition-colors',
+                                k === activeK
+                                    ? 'border-ak-gold/50 bg-ak-gold/10 text-ak-gold'
+                                    : 'border-ak-line text-ak-faint hover:text-foreground',
+                            )}
+                        >
+                            K = {k}
+                        </button>
+                    ))}
+                </div>
+                <span className="ak-mono text-ak-faint text-[11px]">
+                    α = {bestSeries.alpha.toFixed(2)} · stratifikasi label
+                </span>
+            </div>
+
+            {plan && (
+                <div className="border-ak-line bg-ak-raised/40 mb-4 border p-3">
+                    <p className="ak-hud-label text-ak-muted mb-2">
+                        Rencana pembagian · {plan.fold_count} fold ·{' '}
+                        {plan.iterations.length} iterasi ·{' '}
+                        {plan.fold_count - plan.test_folds_per_iteration} latih /{' '}
+                        {plan.test_folds_per_iteration} uji
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                        {(plan.folds ?? []).map((fold) => (
+                            <div
+                                key={fold.fold}
+                                className="ak-clip-sm border-ak-line/70 bg-ak-base/60 border px-2 py-1"
+                                title={`${fold.positive} positif / ${fold.negative} negatif`}
+                            >
+                                <span className="ak-mono text-ak-muted text-[10px]">
+                                    F{fold.fold} · {fold.size}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="mt-3 flex flex-col gap-1">
+                        {plan.iterations.map((iteration) => (
+                            <div
+                                key={iteration.iteration}
+                                className="flex flex-wrap items-center gap-1.5"
+                            >
+                                <span className="ak-mono text-ak-faint w-16 text-[10px]">
+                                    Iter {iteration.iteration}
+                                </span>
+                                {Array.from(
+                                    { length: plan.fold_count },
+                                    (_, index) => {
+                                        const fold = index + 1;
+                                        const isTest =
+                                            iteration.test_folds.includes(fold);
+
+                                        return (
+                                            <span
+                                                key={fold}
+                                                className={cn(
+                                                    'ak-mono px-1.5 py-0.5 text-[10px]',
+                                                    isTest
+                                                        ? 'bg-ak-gold/20 text-ak-gold'
+                                                        : 'bg-ak-line/40 text-ak-faint',
+                                                )}
+                                            >
+                                                {fold}
+                                            </span>
+                                        );
+                                    },
+                                )}
+                                <span className="ak-mono text-ak-faint text-[10px]">
+                                    {iteration.train_size} latih /{' '}
+                                    {iteration.test_size} uji
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <KFoldTable series={bestSeries} />
+        </Panel>
     );
 }
 
@@ -216,6 +425,8 @@ export default function Visualisasi({
             <Panel title="Grid Eksperimen" code="EV-02">
                 <ConfigGridTable evaluation={evaluation} />
             </Panel>
+
+            <KFoldPanel evaluation={evaluation} />
         </div>
     );
 }

@@ -11,7 +11,8 @@ use RuntimeException;
  * = positif (1), rating 1-2 = negatif (0), rating 3 = netral -> dikeluarkan
  * sebagai "unclear". Ini penyimpangan sadar dari BL-14 (label manual) yang
  * dicatat di run_meta.json. Tokenisasi berbagi konvensi dengan PredictService
- * dan menambah penyaringan stopword (resources/stopwords-id.txt).
+ * dan menambah penyaringan stopword (resources/stopwords-id.txt). Evaluasi
+ * memakai K-Fold stratifikasi + Multinomial Naive Bayes (TF-IDF per fold).
  */
 class CsvReviewImporter
 {
@@ -20,7 +21,7 @@ class CsvReviewImporter
     /** @var array<int, string> stopword dalam huruf kecil */
     private array $stopwords;
 
-    public function __construct(private readonly LexiconClassifier $classifier)
+    public function __construct()
     {
         $this->stopwords = $this->loadStopwords();
     }
@@ -198,24 +199,31 @@ class CsvReviewImporter
         $included = $processed['rows'];
         $summary = $processed['summary'];
 
-        $oof = $this->oofRows($included, $runId);
-        $confusion = $this->confusion($oof);
+        $evaluation = (new KFoldEvaluator)->evaluate($included);
+        $best = $evaluation['best'] ?? ['alpha' => 1.0, 'k' => 10];
+        $oof = $this->oofRows($included, $evaluation['oof']);
         $words = $this->wordFrequencies($included);
 
         return [
             'run_meta.json' => $this->json([
                 'run_id' => $runId,
                 'seed' => 42,
-                'best_alpha' => 1.0,
-                'best_k' => 10,
+                'best_alpha' => (float) $best['alpha'],
+                'best_k' => (int) $best['k'],
                 'dataset_sha256' => $datasetHash,
                 'generated_at' => now()->toIso8601String(),
                 'demo' => false,
                 'source' => 'csv-import',
-                'note' => 'Label true = proxy rating (4-5 positif, 1-2 negatif, 3 netral dieksklusi; penyimpangan BL-14 atas keputusan pemilik proyek). label_pred dari leksikon teks (LexiconClassifier); ulasan tanpa kata kunci mengikuti rating dengan basis "rating" dan keyakinan rendah (proba_pos 0.5).',
+                'kfold' => [
+                    'strategy' => 'stratified',
+                    'folds' => KFoldEvaluator::FOLDS,
+                    'k10_test_folds' => 2,
+                    'seed' => 42,
+                ],
+                'note' => 'Label true = proxy rating (4-5 positif, 1-2 negatif, 3 netral dieksklusi; penyimpangan BL-14 atas keputusan pemilik proyek). label_pred dari Multinomial Naive Bayes + TF-IDF yang dilatih per fold K-Fold stratifikasi.',
             ]),
             'data_summary.json' => $this->json($summary),
-            'results.json' => $this->json($this->results($runId, $confusion, $summary['class_distribution'])),
+            'results.json' => $this->json($this->results($runId, $evaluation, $summary['class_distribution'])),
             'oof_predictions.csv' => $this->oofCsv($oof),
             'words.json' => $this->json($this->wordsPayload($runId, $words, $topWords, count($included))),
             'reviews.json' => $this->json($this->reviewsPayload($runId, $included, $oof)),
@@ -269,23 +277,24 @@ class CsvReviewImporter
 
     /**
      * @param  list<array<string, mixed>>  $included
+     * @param  array<string, array{label_pred: int, proba_pos: float, fold: int}>  $predictions
      * @return list<array{review_id: string, label_true: int, label_pred: int, proba_pos: float, fold: int, basis: string}>
      */
-    private function oofRows(array $included, string $runId): array
+    private function oofRows(array $included, array $predictions): array
     {
         $rows = [];
 
         foreach ($included as $row) {
-            $true = (int) $row['label_true'];
-            $prediction = $this->textPrediction((string) $row['review'], $true);
+            $reviewId = (string) $row['review_id'];
+            $prediction = $predictions[$reviewId] ?? null;
 
             $rows[] = [
-                'review_id' => $row['review_id'],
-                'label_true' => $true,
-                'label_pred' => $prediction['label_pred'],
-                'proba_pos' => $prediction['proba_pos'],
-                'basis' => $prediction['basis'],
-                'fold' => (((int) substr($row['review_id'], 1)) - 1) % 10 + 1,
+                'review_id' => $reviewId,
+                'label_true' => (int) $row['label_true'],
+                'label_pred' => $prediction === null ? (int) $row['label_true'] : (int) $prediction['label_pred'],
+                'proba_pos' => $prediction === null ? 0.5 : (float) $prediction['proba_pos'],
+                'basis' => $prediction === null ? 'fallback' : 'model',
+                'fold' => $prediction === null ? 1 : (int) $prediction['fold'],
             ];
         }
 
@@ -293,151 +302,36 @@ class CsvReviewImporter
     }
 
     /**
-     * Prediksi berbasis teks (leksikon). Teks tanpa kata kunci mengikuti label
-     * rating dengan keyakinan rendah yang dicatat lewat kolom `basis`.
-     *
-     * @return array{label_pred: int, proba_pos: float, basis: string}
-     */
-    private function textPrediction(string $review, int $true): array
-    {
-        $score = $this->classifier->classify($review);
-
-        if ($score !== null && $score['detected']) {
-            return [
-                'label_pred' => $score['label'] === 'positif' ? 1 : 0,
-                'proba_pos' => $score['proba_pos'],
-                'basis' => 'teks',
-            ];
-        }
-
-        return [
-            'label_pred' => $true,
-            'proba_pos' => 0.5,
-            'basis' => 'rating',
-        ];
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $oof
-     * @return array{tn: int, fp: int, fn: int, tp: int}
-     */
-    private function confusion(array $oof): array
-    {
-        $confusion = ['tn' => 0, 'fp' => 0, 'fn' => 0, 'tp' => 0];
-
-        foreach ($oof as $row) {
-            $true = (int) $row['label_true'];
-            $pred = (int) $row['label_pred'];
-
-            if ($true === 0 && $pred === 1) {
-                $confusion['fp']++;
-            } elseif ($true === 1 && $pred === 0) {
-                $confusion['fn']++;
-            } elseif ($true === 1 && $pred === 1) {
-                $confusion['tp']++;
-            } else {
-                $confusion['tn']++;
-            }
-        }
-
-        return $confusion;
-    }
-
-    /**
-     * @param  array{tn: int, fp: int, fn: int, tp: int}  $confusion
+     * @param  array<string, mixed>  $evaluation
      * @param  array{positif: int, negatif: int}  $distribution
      * @return array<string, mixed>
      */
-    private function results(string $runId, array $confusion, array $distribution): array
+    private function results(string $runId, array $evaluation, array $distribution): array
     {
-        $total = $confusion['tp'] + $confusion['fp'] + $confusion['fn'] + $confusion['tn'];
-        $tp = $confusion['tp'];
-        $fp = $confusion['fp'];
-        $fn = $confusion['fn'];
-        $tn = $confusion['tn'];
-
-        $base = [
-            'accuracy' => ($tp + $tn) / $total,
-            'positive' => $this->classStats($tp, $tp + $fp, $tp + $fn),
-            'negative' => $this->classStats($tn, $tn + $fn, $tn + $fp),
-        ];
-
-        $base['macro'] = [
-            'precision' => (($base['positive']['precision']['mean'] ?? 0) + ($base['negative']['precision']['mean'] ?? 0)) / 2,
-            'recall' => (($base['positive']['recall']['mean'] ?? 0) + ($base['negative']['recall']['mean'] ?? 0)) / 2,
-            'f1' => (($base['positive']['f1']['mean'] ?? 0) + ($base['negative']['f1']['mean'] ?? 0)) / 2,
-        ];
-
+        $total = $distribution['positif'] + $distribution['negatif'];
         $configs = [];
 
-        foreach ([5, 10] as $k) {
-            foreach ([0.01, 0.1, 0.5, 1.0, 1.5, 2.0] as $alpha) {
-                $configs[] = [
-                    'k' => $k,
-                    'alpha' => $alpha,
-                    'metrics' => $this->configMetrics($base, $alpha, $k),
-                    'folds' => $k,
-                ];
-            }
+        foreach ($evaluation['configs'] as $config) {
+            $configs[] = [
+                'k' => (int) $config['k'],
+                'alpha' => (float) $config['alpha'],
+                'folds' => (int) $config['folds'],
+                'effective_folds' => (int) $config['effective_folds'],
+                'test_folds_per_iteration' => (int) $config['test_folds_per_iteration'],
+                'iterations' => (int) $config['iterations'],
+                'metrics' => $config['metrics'],
+                'per_fold' => $config['per_fold'],
+            ];
         }
+
+        $best = $evaluation['best'] ?? ['alpha' => 1.0, 'k' => 10];
 
         return [
             'run_id' => $runId,
-            'best' => ['alpha' => 1.0, 'k' => 10],
-            'baseline_majority_accuracy' => round(max($distribution['positif'], $distribution['negatif']) / $total, 6),
+            'best' => ['alpha' => (float) $best['alpha'], 'k' => (int) $best['k']],
+            'baseline_majority_accuracy' => $total > 0 ? round(max($distribution['positif'], $distribution['negatif']) / $total, 6) : 0.0,
+            'fold_plans' => $evaluation['fold_plans'],
             'configs' => $configs,
-        ];
-    }
-
-    /**
-     * @param  array<string, mixed>  $base
-     * @return array<string, mixed>
-     */
-    private function configMetrics(array $base, float $alpha, int $k): array
-    {
-        $boost = $k === 10 ? 0.0015 : 0.0;
-        $std = 0.006 + abs($alpha - 1.0) * 0.002 * ($k === 10 ? 0.85 : 1.0);
-
-        $scale = function (float $value) use ($boost, $std): array {
-            return [
-                'mean' => round($value + $boost, 4),
-                'std' => round($std, 4),
-            ];
-        };
-
-        return [
-            'accuracy' => $scale($base['accuracy']),
-            'positive' => [
-                'precision' => $scale($base['positive']['precision']['mean']),
-                'recall' => $scale($base['positive']['recall']['mean']),
-                'f1' => $scale($base['positive']['f1']['mean']),
-            ],
-            'negative' => [
-                'precision' => $scale($base['negative']['precision']['mean']),
-                'recall' => $scale($base['negative']['recall']['mean']),
-                'f1' => $scale($base['negative']['f1']['mean']),
-            ],
-            'macro' => [
-                'precision' => $scale($base['macro']['precision']),
-                'recall' => $scale($base['macro']['recall']),
-                'f1' => $scale($base['macro']['f1']),
-            ],
-        ];
-    }
-
-    /**
-     * @return array{precision: array{mean: float, std: float}, recall: array{mean: float, std: float}, f1: array{mean: float, std: float}}
-     */
-    private function classStats(int $truePositive, int $predictedPositive, int $actualPositive): array
-    {
-        $precision = $predictedPositive > 0 ? $truePositive / $predictedPositive : 0.0;
-        $recall = $actualPositive > 0 ? $truePositive / $actualPositive : 0.0;
-        $f1 = $precision + $recall > 0 ? 2 * ($precision * $recall) / ($precision + $recall) : 0.0;
-
-        return [
-            'precision' => ['mean' => round($precision, 4), 'std' => 0.0],
-            'recall' => ['mean' => round($recall, 4), 'std' => 0.0],
-            'f1' => ['mean' => round($f1, 4), 'std' => 0.0],
         ];
     }
 

@@ -137,11 +137,21 @@ Invariant: `raw = Σ excluded + included`; `included = Σ class_distribution`.
   "run_id": "a1b2c3",
   "best": { "alpha": 1.0, "k": 10 },
   "baseline_majority_accuracy": 0.72,
+  "fold_plans": {
+    "5": { "k": 5, "fold_count": 5, "test_folds_per_iteration": 1, "iterations": [{ "iteration": 1, "test_folds": [1], "train_size": 2800, "test_size": 700 }] },
+    "10": { "k": 10, "fold_count": 10, "test_folds_per_iteration": 2, "iterations": [{ "iteration": 1, "test_folds": [1, 2], "train_size": 2800, "test_size": 700 }] }
+  },
   "configs": [
     {
       "k": 5,
       "alpha": 1.0,
       "folds": 5,
+      "effective_folds": 5,
+      "test_folds_per_iteration": 1,
+      "iterations": 5,
+      "per_fold": [
+        { "fold": 1, "iteration": 1, "test_folds": [1], "train_size": 2800, "test_size": 700, "accuracy": 0.88, "positive": {}, "negative": {}, "macro": {} }
+      ],
       "metrics": {
         "accuracy":   { "mean": 0.88, "std": 0.006 },
         "positive":   { "precision": { "mean": 0.0, "std": 0.0 }, "recall": { "mean": 0.0, "std": 0.0 }, "f1": { "mean": 0.0, "std": 0.0 } },
@@ -156,6 +166,9 @@ Invariant: `raw = Σ excluded + included`; `included = Σ class_distribution`.
 - Setiap `mean`/`std` berupa **angka** (bukan string). Wajib memuat
   `metrics.macro.f1.mean` dan `.std` — dipakai seleksi terbaik & tampilan.
 - `baseline_majority_accuracy = max(positif, negatif) / included`.
+- `fold_plans` dan `per_fold` opsional: artefak lama tanpa field ini tetap valid
+  dan panel K-Fold disembunyikan. K=10 memakai 2 fold uji per iterasi sehingga
+  ada 5 iterasi dengan 8 fold latih / 2 fold uji; metrik per fold tetap 10 titik.
 
 ### `oof_predictions.csv`
 

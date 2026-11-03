@@ -178,6 +178,72 @@ class ArtifactRepository
             'metrics_mean_over_folds' => $metrics,
             'baseline_majority_accuracy' => $this->baselineMajorityAccuracy($oof),
             'grid' => $this->grid($results),
+            'kfold' => $this->kfold($results),
+        ];
+    }
+
+    /**
+     * Rincian K-Fold (fold plan + metrik per fold) untuk visualisasi.
+     *
+     * @param  array<string, mixed>  $results
+     * @return array{plans: array<string, mixed>, series: list<array<string, mixed>>}|null
+     */
+    private function kfold(array $results): ?array
+    {
+        $plans = $results['fold_plans'] ?? null;
+        $configs = $results['configs'] ?? null;
+
+        if (! is_array($plans) || ! is_array($configs)) {
+            return null;
+        }
+
+        $series = [];
+
+        foreach ($configs as $config) {
+            $perFold = $config['per_fold'] ?? null;
+
+            if (! is_array($perFold)) {
+                continue;
+            }
+
+            $rows = [];
+
+            foreach ($perFold as $fold) {
+                if (! is_array($fold)) {
+                    continue;
+                }
+
+                $rows[] = [
+                    'fold' => (int) ($fold['fold'] ?? 0),
+                    'iteration' => (int) ($fold['iteration'] ?? 0),
+                    'test_folds' => array_values(array_map('intval', (array) ($fold['test_folds'] ?? []))),
+                    'train_size' => (int) ($fold['train_size'] ?? 0),
+                    'test_size' => (int) ($fold['test_size'] ?? 0),
+                    'accuracy' => (float) ($fold['accuracy'] ?? 0.0),
+                    'macro_f1' => (float) data_get($fold, 'macro.f1.mean', 0.0),
+                    'positive_f1' => (float) data_get($fold, 'positive.f1.mean', 0.0),
+                    'negative_f1' => (float) data_get($fold, 'negative.f1.mean', 0.0),
+                ];
+            }
+
+            if ($rows === []) {
+                continue;
+            }
+
+            $series[] = [
+                'k' => (int) ($config['k'] ?? 0),
+                'alpha' => (float) ($config['alpha'] ?? 0),
+                'per_fold' => $rows,
+            ];
+        }
+
+        if ($series === []) {
+            return null;
+        }
+
+        return [
+            'plans' => $plans,
+            'series' => $series,
         ];
     }
 

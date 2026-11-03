@@ -3,7 +3,6 @@
 namespace Tests\Unit;
 
 use App\Support\CsvReviewImporter;
-use App\Support\LexiconClassifier;
 use Tests\TestCase;
 
 uses(TestCase::class);
@@ -24,7 +23,7 @@ CSV);
 }
 
 it('menghapus stopword dan token pendek dari teks', function () {
-    $importer = new CsvReviewImporter(new LexiconClassifier);
+    $importer = new CsvReviewImporter;
 
     expect($importer->tokenize('Game bagus dan seru'))->toBe(['game', 'bagus', 'seru'])
         ->and($importer->tokenize('Keren sekali grafisnya wow'))->toBe(['keren', 'grafisnya', 'wow'])
@@ -39,7 +38,7 @@ it('menghitung ringkasan impor sesuai aturan proxy rating', function () {
 
     config()->set('artifacts.path', $dir.DIRECTORY_SEPARATOR.'out');
 
-    $summary = (new CsvReviewImporter(new LexiconClassifier))->import($csv);
+    $summary = (new CsvReviewImporter)->import($csv);
 
     expect($summary['raw'])->toBe(4)
         ->and($summary['included'])->toBe(2)
@@ -60,11 +59,11 @@ it('impor bersifat deterministik untuk berkas yang sama', function () {
     $csv = importerTempCsv($dir, 'in.csv');
 
     config()->set('artifacts.path', $dir.'/out');
-    (new CsvReviewImporter(new LexiconClassifier))->import($csv, 50);
+    (new CsvReviewImporter)->import($csv, 50);
     $first = file_get_contents($dir.'/out/run_meta.json');
 
     config()->set('artifacts.path', $dir.'/out2');
-    (new CsvReviewImporter(new LexiconClassifier))->import($csv, 50);
+    (new CsvReviewImporter)->import($csv, 50);
     $second = file_get_contents($dir.'/out2/run_meta.json');
 
     expect($first)->toBe($second);
@@ -85,7 +84,7 @@ it('menulis reviews.json dengan komentar, rating, dan hasil analisis', function 
     $csv = importerTempCsv($dir, 'in.csv');
 
     config()->set('artifacts.path', $dir.'/out');
-    (new CsvReviewImporter(new LexiconClassifier))->import($csv);
+    (new CsvReviewImporter)->import($csv);
 
     $reviews = json_decode((string) file_get_contents($dir.'/out/reviews.json'), true);
 

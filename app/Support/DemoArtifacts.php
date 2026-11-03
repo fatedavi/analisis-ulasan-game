@@ -9,8 +9,8 @@ namespace App\Support;
  * Seluruh angka dihasilkan (bukan hardcode di UI) sehingga memenuhi invariant
  * SC-4, dan ditandai "demo" di run_meta.json. Prediksi OOF serta daftar ulasan
  * dibangun dari klasifikasi leksikon teks (LexiconClassifier) atas templat
- * demo, jadi proba_pos dan basis jujur terhadap isi ulasan — mekanisme yang
- * persis sama dengan CsvReviewImporter.
+ * demo, jadi proba_pos dan basis jujur terhadap isi ulasan. Metrik K-Fold
+ * dibangkitkan deterministik dari akurasi dasar yang sama.
  */
 class DemoArtifacts
 {
@@ -96,7 +96,13 @@ class DemoArtifacts
             'source' => 'demo',
             'seed' => 42,
             'generated_at' => '2026-09-21T10:00:00+07:00',
-            'note' => 'Artefak demo deterministik. Prediksi dari klasifikasi leksikon teks ulasan demo; ganti dengan hasil `python -m src.train_eval` untuk data asli.',
+            'kfold' => [
+                'strategy' => 'stratified',
+                'folds' => [5, 10],
+                'k10_test_folds' => 2,
+                'seed' => 42,
+            ],
+            'note' => 'Artefak demo deterministik. Prediksi dari klasifikasi leksikon teks ulasan demo; ganti dengan hasil `php artisan artifacts:import` atau `python -m src.train_eval` untuk data asli.',
         ]);
     }
 
@@ -129,11 +135,19 @@ class DemoArtifacts
             ['alpha' => 1.5, 'k' => 5], ['alpha' => 1.5, 'k' => 10],
             ['alpha' => 2.0, 'k' => 5], ['alpha' => 2.0, 'k' => 10],
         ] as $cfg) {
+            $k = (int) $cfg['k'];
+            $alpha = (float) $cfg['alpha'];
+
             $configs[] = [
-                'alpha' => (float) $cfg['alpha'],
-                'k' => (int) $cfg['k'],
-                'fold' => (int) $cfg['k'],
-                'metrics' => $this->metrics((float) $cfg['alpha'], (int) $cfg['k']),
+                'alpha' => $alpha,
+                'k' => $k,
+                'fold' => $k,
+                'folds' => $k,
+                'effective_folds' => $k,
+                'test_folds_per_iteration' => $k === 10 ? 2 : 1,
+                'iterations' => $k === 10 ? 5 : 5,
+                'metrics' => $this->metrics($alpha, $k),
+                'per_fold' => $this->perFold($alpha, $k),
             ];
         }
 
@@ -142,8 +156,106 @@ class DemoArtifacts
             'demo' => true,
             'best' => ['alpha' => 1.0, 'k' => 10],
             'baseline_majority_accuracy' => round(self::POSITIVE_TRUE / self::TOTAL, 6),
+            'fold_plans' => ['5' => $this->foldPlan(5), '10' => $this->foldPlan(10)],
             'configs' => $configs,
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function foldPlan(int $k): array
+    {
+        $foldSize = intdiv(self::TOTAL, $k);
+        $positive = (int) round(self::POSITIVE_TRUE / $k);
+        $negative = $foldSize - $positive;
+        $folds = [];
+        $iterations = [];
+
+        for ($fold = 1; $fold <= $k; $fold++) {
+            $folds[] = [
+                'fold' => $fold,
+                'size' => $foldSize,
+                'positive' => $positive,
+                'negative' => $negative,
+            ];
+        }
+
+        $testFoldsPerIteration = $k === 10 ? 2 : 1;
+        $iteration = 0;
+
+        for ($fold = 1; $fold <= $k; $fold += $testFoldsPerIteration) {
+            $iteration++;
+            $testFolds = $testFoldsPerIteration === 2 ? [$fold, $fold + 1] : [$fold];
+            $iterations[] = [
+                'iteration' => $iteration,
+                'test_folds' => $testFolds,
+                'train_size' => self::TOTAL - ($foldSize * $testFoldsPerIteration),
+                'test_size' => $foldSize * $testFoldsPerIteration,
+            ];
+        }
+
+        return [
+            'k' => $k,
+            'fold_count' => $k,
+            'test_folds_per_iteration' => $testFoldsPerIteration,
+            'iterations_count' => count($iterations),
+            'folds' => $folds,
+            'iterations' => $iterations,
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function perFold(float $alpha, int $k): array
+    {
+        $offsets = $k === 10
+            ? [0.004, -0.003, 0.002, -0.002, 0.003, -0.004, 0.001, -0.001, 0.002, -0.002]
+            : [0.003, -0.002, 0.001, -0.001, -0.001];
+        $aggregate = $this->metrics($alpha, $k);
+        $rows = [];
+
+        foreach ($offsets as $index => $offset) {
+            $fold = $index + 1;
+            $iteration = $k === 10 ? (int) ceil($fold / 2) : $fold;
+            $rows[] = [
+                'fold' => $fold,
+                'iteration' => $iteration,
+                'test_folds' => $k === 10 ? [$fold % 2 === 0 ? $fold - 1 : $fold, $fold % 2 === 0 ? $fold : $fold + 1] : [$fold],
+                'train_size' => self::TOTAL - (intdiv(self::TOTAL, $k) * ($k === 10 ? 2 : 1)),
+                'test_size' => intdiv(self::TOTAL, $k) * ($k === 10 ? 2 : 1),
+                'accuracy' => $this->shift($aggregate['accuracy']['mean'], $offset),
+                'positive' => $this->shiftClass($aggregate['positive'], $offset),
+                'negative' => $this->shiftClass($aggregate['negative'], $offset),
+                'macro' => $this->shiftClass($aggregate['macro'], $offset),
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function shift(float $value, float $offset): float
+    {
+        return round(max(0.0, min(1.0, $value + $offset)), 6);
+    }
+
+    /**
+     * @param  array<string, array<string, float>>  $class
+     * @return array<string, array<string, float>>
+     */
+    private function shiftClass(array $class, float $offset): array
+    {
+        $shifted = [];
+
+        foreach ($class as $metric => $stat) {
+            $shifted[$metric] = [
+                'mean' => $this->shift((float) $stat['mean'], $offset),
+                'std' => 0.0,
+            ];
+        }
+
+        return $shifted;
     }
 
     /**
