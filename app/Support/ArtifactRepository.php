@@ -219,6 +219,8 @@ class ArtifactRepository
                     'test_folds' => array_values(array_map('intval', (array) ($fold['test_folds'] ?? []))),
                     'train_size' => (int) ($fold['train_size'] ?? 0),
                     'test_size' => (int) ($fold['test_size'] ?? 0),
+                    'train_accuracy' => (float) ($fold['train_accuracy'] ?? $fold['accuracy'] ?? 0.0),
+                    'train_macro_f1' => (float) data_get($fold, 'train_macro_f1', data_get($fold, 'macro.f1.mean', 0.0)),
                     'accuracy' => (float) ($fold['accuracy'] ?? 0.0),
                     'macro_f1' => (float) data_get($fold, 'macro.f1.mean', 0.0),
                     'positive_f1' => (float) data_get($fold, 'positive.f1.mean', 0.0),

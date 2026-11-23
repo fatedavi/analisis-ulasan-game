@@ -82,6 +82,17 @@ it('mengimpor CSV menjadi artefak nyata sesuai aturan rating proxy', function ()
         ->and($evaluation['kfold']['plans'])->toHaveKeys(['5', '10'])
         ->and($evaluation['kfold']['series'])->toHaveCount(12);
 
+    $firstFold = $evaluation['kfold']['series'][0]['per_fold'][0];
+
+    expect($firstFold)->toHaveKeys([
+        'train_accuracy',
+        'train_macro_f1',
+        'accuracy',
+        'macro_f1',
+    ])
+        ->and($firstFold['train_accuracy'])->toBeBetween(0.0, 1.0)
+        ->and($firstFold['train_macro_f1'])->toBeBetween(0.0, 1.0);
+
     getJson('/api/summary')
         ->assertOk()
         ->assertJson([

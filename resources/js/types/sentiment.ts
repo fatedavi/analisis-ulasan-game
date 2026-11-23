@@ -49,6 +49,8 @@ export type FoldRow = {
     test_folds: number[];
     train_size: number;
     test_size: number;
+    train_accuracy: number;
+    train_macro_f1: number;
     accuracy: number;
     macro_f1: number;
     positive_f1: number;

@@ -225,6 +225,8 @@ class DemoArtifacts
                 'test_folds' => $k === 10 ? [$fold % 2 === 0 ? $fold - 1 : $fold, $fold % 2 === 0 ? $fold : $fold + 1] : [$fold],
                 'train_size' => self::TOTAL - (intdiv(self::TOTAL, $k) * ($k === 10 ? 2 : 1)),
                 'test_size' => intdiv(self::TOTAL, $k) * ($k === 10 ? 2 : 1),
+                'train_accuracy' => $this->shift($aggregate['accuracy']['mean'] + 0.06 - abs($alpha - 1.0) * 0.01, $offset * 0.5),
+                'train_macro_f1' => $this->shift($aggregate['macro']['f1']['mean'] + 0.05 - abs($alpha - 1.0) * 0.008, $offset * 0.5),
                 'accuracy' => $this->shift($aggregate['accuracy']['mean'], $offset),
                 'positive' => $this->shiftClass($aggregate['positive'], $offset),
                 'negative' => $this->shiftClass($aggregate['negative'], $offset),

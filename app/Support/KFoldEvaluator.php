@@ -92,6 +92,12 @@ final class KFoldEvaluator
             $model = new MultinomialNaiveBayes;
             $model->train($trainDocuments, $trainLabels, $alpha);
 
+            $trainPredictions = $model->predictAll($trainDocuments);
+            $trainMetrics = $this->metrics(
+                $trainLabels,
+                array_map(fn (array $prediction): int => (int) $prediction['label'], $trainPredictions),
+            );
+
             $testDocuments = array_map(fn (int $index): array => $documents[$index], $testIndices);
             $predictions = $model->predictAll($testDocuments);
             $foldPredictions = [];
@@ -124,6 +130,8 @@ final class KFoldEvaluator
                     'test_folds' => $iteration['test_folds'],
                     'train_size' => (int) $iteration['train_size'],
                     'test_size' => count($items),
+                    'train_accuracy' => $trainMetrics['accuracy'],
+                    'train_macro_f1' => $trainMetrics['macro']['f1'],
                     'accuracy' => $metrics['accuracy'],
                     'positive' => $this->withStd($metrics['positive']),
                     'negative' => $this->withStd($metrics['negative']),

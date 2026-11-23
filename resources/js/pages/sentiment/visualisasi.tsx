@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Trophy } from 'lucide-react';
 
+import AlphaCurve from '@/components/ak/alpha-curve';
 import ConfusionMatrix from '@/components/ak/confusion-matrix';
 import EmptyState from '@/components/ak/empty-state';
 import Panel from '@/components/ak/panel';
@@ -196,6 +197,9 @@ function KFoldPanel({ evaluation }: { evaluation: Evaluation }) {
     const [selectedK, setSelectedK] = useState<number | null>(
         kfold ? evaluation.best.k : null,
     );
+    const [selectedAlpha, setSelectedAlpha] = useState<number | null>(
+        kfold ? evaluation.best.alpha : null,
+    );
 
     if (!kfold) {
         return null;
@@ -209,20 +213,30 @@ function KFoldPanel({ evaluation }: { evaluation: Evaluation }) {
             ? selectedK
             : availableK[0];
     const candidates = kfold.series.filter((series) => series.k === activeK);
-    const bestSeries =
+    const availableAlpha = [
+        ...new Set(candidates.map((series) => series.alpha)),
+    ].sort((a, b) => a - b);
+    const activeAlpha =
+        selectedAlpha !== null && availableAlpha.includes(selectedAlpha)
+            ? selectedAlpha
+            : availableAlpha.includes(evaluation.best.alpha)
+              ? evaluation.best.alpha
+              : availableAlpha[0];
+    const activeSeries =
         candidates.find(
-            (series) => Math.abs(series.alpha - evaluation.best.alpha) < 1e-9,
+            (series) => Math.abs(series.alpha - activeAlpha) < 1e-9,
         ) ?? candidates[0];
     const plan = kfold.plans[String(activeK)];
 
-    if (!bestSeries) {
+    if (!activeSeries) {
         return null;
     }
 
     return (
         <Panel title="Validasi K-Fold" code="EV-03">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
+            <div className="mb-4 flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="ak-hud-label text-ak-muted w-4">K</span>
                     {availableK.map((k) => (
                         <button
                             key={k}
@@ -239,18 +253,44 @@ function KFoldPanel({ evaluation }: { evaluation: Evaluation }) {
                         </button>
                     ))}
                 </div>
-                <span className="ak-mono text-ak-faint text-[11px]">
-                    α = {bestSeries.alpha.toFixed(2)} · stratifikasi label
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="ak-hud-label text-ak-muted w-4">α</span>
+                    {availableAlpha.map((alpha) => (
+                        <button
+                            key={alpha}
+                            type="button"
+                            onClick={() => setSelectedAlpha(alpha)}
+                            className={cn(
+                                'ak-clip-sm ak-mono border px-3 py-1.5 text-[12px] transition-colors',
+                                Math.abs(alpha - activeAlpha) < 1e-9
+                                    ? 'border-ak-gold/50 bg-ak-gold/10 text-ak-gold'
+                                    : 'border-ak-line text-ak-faint hover:text-foreground',
+                            )}
+                        >
+                            {alpha.toFixed(2)}
+                        </button>
+                    ))}
+                    <span className="ak-mono text-ak-faint ml-1 text-[11px]">
+                        stratifikasi label
+                    </span>
+                </div>
             </div>
+
+            <AlphaCurve
+                series={candidates}
+                activeAlpha={activeAlpha}
+                bestAlpha={
+                    evaluation.best.k === activeK ? evaluation.best.alpha : null
+                }
+            />
 
             {plan && (
                 <div className="border-ak-line bg-ak-raised/40 mb-4 border p-3">
                     <p className="ak-hud-label text-ak-muted mb-2">
                         Rencana pembagian · {plan.fold_count} fold ·{' '}
                         {plan.iterations.length} iterasi ·{' '}
-                        {plan.fold_count - plan.test_folds_per_iteration} latih /{' '}
-                        {plan.test_folds_per_iteration} uji
+                        {plan.fold_count - plan.test_folds_per_iteration} latih
+                        / {plan.test_folds_per_iteration} uji
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                         {(plan.folds ?? []).map((fold) => (
@@ -306,7 +346,7 @@ function KFoldPanel({ evaluation }: { evaluation: Evaluation }) {
                 </div>
             )}
 
-            <KFoldTable series={bestSeries} />
+            <KFoldTable series={activeSeries} />
         </Panel>
     );
 }

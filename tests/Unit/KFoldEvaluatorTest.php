@@ -60,6 +60,9 @@ it('menghasilkan 12 konfigurasi dengan metrik per fold dan OOF unik', function (
 
     foreach ($k10['per_fold'] as $fold) {
         expect($fold['accuracy'])->toBeBetween(0.0, 1.0)
-            ->and($fold['macro']['f1']['mean'])->toBeBetween(0.0, 1.0);
+            ->and($fold['macro']['f1']['mean'])->toBeBetween(0.0, 1.0)
+            ->and($fold['train_accuracy'])->toBeBetween(0.0, 1.0)
+            ->and($fold['train_macro_f1'])->toBeBetween(0.0, 1.0)
+            ->and($fold['train_accuracy'])->toBeGreaterThanOrEqual($fold['accuracy']);
     }
 });

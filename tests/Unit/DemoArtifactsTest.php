@@ -76,6 +76,19 @@ test('demo artifacts contain exactly 12 grid configurations and a valid best', f
         ->and($results['baseline_majority_accuracy'])->toBe(round(2600 / 3500, 6));
 });
 
+test('demo artifacts include training metrics for the alpha comparison chart', function () {
+    $results = json_decode(demoArtifacts()->files()['results.json'], true, flags: JSON_THROW_ON_ERROR);
+
+    foreach ($results['configs'] as $config) {
+        foreach ($config['per_fold'] as $fold) {
+            expect($fold['train_accuracy'])->toBeBetween(0.0, 1.0)
+                ->and($fold['train_macro_f1'])->toBeBetween(0.0, 1.0)
+                ->and($fold['train_accuracy'])->toBeGreaterThanOrEqual($fold['accuracy'])
+                ->and($fold['train_macro_f1'])->toBeGreaterThanOrEqual($fold['macro']['f1']['mean']);
+        }
+    }
+});
+
 test('demo run meta is clearly marked as demo', function () {
     $meta = json_decode(demoArtifacts()->files()['run_meta.json'], true, flags: JSON_THROW_ON_ERROR);
 
